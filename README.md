@@ -1,74 +1,49 @@
-# VanishCam — webcam disappearance effects
+SnapVanish
+Disappear on camera. Reappear on cue.
 
-Video is processed on your computer. It is neither recorded nor sent to a server. The preview window and virtual camera show only the video and effects, without overlaid menus, instructions, or text.
+SnapVanish is a desktop webcam effects project that uses real-time computer vision and hand gestures to create disappearance, particle, and teleportation-style effects. It supports local camera preview and virtual-camera workflows for video calls and streaming.
+Features
+- Normal Vanish: Flash a two-finger V sign to fade out of the camera frame.
+- Particles: Turn your silhouette into drifting particles with the same V gesture.
+- Naruto Vanish: Put your palms together for a smoke-and-substitution effect.
+- Goku Mode: Hold two fingers at your forehead to trigger a teleport-style effect.
+- Virtual camera: Send effects to a compatible virtual camera backend, or capture the preview window in OBS.
+- Local processing: Video effects run on your computer, without sending the webcam feed to a server.
+Requirements
+- Windows and a working webcam
+- Python and the packages listed in requirements.txt for source-based use
+- OBS Studio or another compatible virtual-camera backend for virtual-camera workflows
+Quick start
+Clone the repository and launch the local menu:
+git clone https://github.com/ATLURI0001/SnapVanish.git
+cd SnapVanish
+.\AVVIA_LOCALE.bat
+Choose a mode in the startup menu. For background capture, step out of the camera frame for approximately four seconds, then step back in.
+Launch with a specific mode
+.\AVVIA_LOCALE.bat --mode normal
+.\AVVIA_LOCALE.bat --mode particles
+.\AVVIA_LOCALE.bat --mode naruto
+.\AVVIA_LOCALE.bat --mode goku
+Virtual camera / OBS
+.\AVVIA_VIRTUAL.bat
+For an OBS window-capture workflow, run AVVIA_OBS.bat, add a Window Capture source in OBS, and select the webcam preview window. If using OBS's virtual camera as the app's output, stop OBS Virtual Camera before launching this app so there is no conflict.
+Controls
+Key	Action
+Space	Capture the background again
+V	Trigger an effect manually, except in Goku mode
+R	Reappear, except in Goku mode
+F	Toggle fullscreen
+Q or Esc	Exit and release camera devices
 
-For step-by-step instructions in English and Italian, see the [user guide](USER_GUIDE_EN_IT.md).
 
-## ☕ Buy me a coffee
+Camera settings
+.\AVVIA_LOCALE.bat --camera 1 --width 1280 --height 720 --fps 30
+Use --gesture-debug to print gesture-recognition diagnostics in the terminal.
+Technology
+Python · OpenCV · MediaPipe · Real-time image processing · Virtual camera integration
+Licensing and provenance
+SnapVanish is based on an existing third-party webcam effects codebase. The upstream repository did not include an explicit license file when this document was prepared. Before publishing or distributing modified source code, obtain permission from the copyright holder and preserve any required notices and original Git authorship.
 
-If you like this project and want to support it, you can buy me a coffee through [PayPal](https://paypal.me/nicovic17) or [Revolut](https://revolut.me/nicoauriemma).
-
-## Download for Windows
-
-[Download VanishCam.exe]( https://nicoaauriemma.vercel.app/shop ) and double-click it to run the app. You do not need to install Python.
-
-The published EXE may predate the Particles and Goku modes. To use them now, run the local scripts or rebuild the EXE from these sources.
-
-## Getting started
-
-1. Double-click `AVVIA_LOCALE.bat`.
-2. In the start menu, choose **Normal Vanish**, **Naruto Vanish**, **Particles**, or **Goku** with the mouse or the `1`, `2`, `3`, and `4` keys.
-3. Step out of the camera frame for 4 seconds while the background is captured. The terminal tells you when you can step back in.
-
-**Normal Vanish:** Raise your index and middle fingers in a V sign. The dissolve starts as soon as the gesture is recognized and lasts about 3.6 seconds.
-
-**Particles:** Make the same V sign as in Normal Vanish. Your silhouette breaks into small colored fragments that drift sideways as if carried by the wind. The effect lasts about 2.1 seconds. It captures your silhouette once when the effect starts to keep the video smooth.
-
-**Goku:** Hold your index and middle fingers straight and together against your forehead for 1 second. Animated vertical comic-style lines run across your silhouette just before you teleport away and linger briefly afterward. To reappear, lower your hand, then repeat the gesture for another 1 second. The return uses the reverse effect. If you break the pose, the countdown starts over. `assets/teleport.MP3` plays on both disappearance and reappearance. The terminal shows the countdown for each gesture. The `V` and `R` keys are disabled in this mode: the gesture is the only way to disappear and reappear. No text is overlaid on the video.
-
-**Naruto Vanish:** Bring your palms together in front of the webcam, with your fingers side by side rather than interlaced. Keep both hands visible. As soon as the gesture is recognized, you vanish in a cloud of smoke and a wooden log appears, falls, and remains visible until you press `R`. No microphone is needed. Naruto mode uses `hand_landmarker.task` to track both hands. `assets/vanish.MP3` plays through your computer speakers when the disappearance starts, including when triggered with `V`. You can trigger it again after pressing `R`.
-
-To start a mode without the menu:
-
-```powershell
-local_app\AVVIA_LOCALE.bat --mode naruto
-local_app\AVVIA_LOCALE.bat --mode normal
-local_app\AVVIA_LOCALE.bat --mode particles
-local_app\AVVIA_LOCALE.bat --mode goku
-```
-
-## Virtual camera and OBS
-
-If [OBS Studio](https://obsproject.com/) is installed, the app automatically tries to open **OBS Virtual Camera**. The terminal shows the device name. Use `AVVIA_VIRTUAL.bat` to require a virtual camera. Select **OBS Virtual Camera** in the app that will receive the video. OBS's virtual camera must be stopped while this app is producing its output.
-
-To use the effect in an OBS scene, run `AVVIA_OBS.bat`, add a **Window Capture** source, select **Webcam - Anteprima**, and then start the virtual camera from OBS. Alternatively, use [Unity Capture](https://github.com/schellingb/UnityCapture) as a separate virtual video source:
-
-```powershell
-local_app\AVVIA_VIRTUAL.bat --virtual-backend unitycapture
-```
-
-OBS has only one virtual camera. Do not use it as both an OBS input and output at the same time. See the [pyvirtualcam documentation](https://github.com/letmaik/pyvirtualcam#supported-virtual-cameras).
-
-## Controls
-
-- `SPACE`: capture a new background.
-- `R`: make the person reappear.
-- `V`: manually start the selected mode's effect.
-- `F`: toggle fullscreen.
-- `Q` or `ESC`: quit and release the cameras.
-
-The `V` and `R` keys are disabled in Goku mode.
-
-You can change the camera, resolution, and maximum virtual-output FPS:
-
-```powershell
-local_app\AVVIA_LOCALE.bat --camera 1 --width 1280 --height 720 --fps 30
-```
-
-To troubleshoot gesture recognition without adding text to the video, pass `--gesture-debug`. Diagnostic information appears only in the terminal.
-
-## Visual assets
-
-The [wooden log](assets/substitution_log.png) is an original illustration generated with ImageGen using the supplied image as a visual reference. Smoke is drawn in real time by `naruto_effect.py` so it follows the person's position and scales with the video. We also considered a [CC0 smoke sprite sheet](https://opengameart.org/content/smoke-sprite-sheet), but the procedural animation adapts better to dynamic positioning without an additional asset. No anime frames or assets are included in the project.
-
-Goku mode uses the [MediaPipe BlazeFace short-range model](https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/tasks/web/vision/README.md) to estimate the forehead position and `hand_landmarker.task` to track the fingers. The teleport's visual trace is drawn in code, without anime frames.
+Third-party models, audio, and other assets may have separate license terms.
+Responsible use
+Only use camera and video effects with permission from the people involved. SnapVanish is designed for creative effects, demonstrations, and streaming—not impersonation or deceptive recordings.
