@@ -14,7 +14,11 @@ SOUND_PATH = Path(__file__).resolve().parent / "assets" / "vanish.MP3"
 class VanishSound:
     def __init__(self, path: Path = SOUND_PATH):
         if not path.is_file():
-            raise RuntimeError(f"Audio Naruto non trovato: {path}")
+            alt_path = path.with_suffix(".mp3") if path.suffix == ".MP3" else path.with_suffix(".MP3")
+            if alt_path.is_file():
+                path = alt_path
+            else:
+                raise RuntimeError(f"Audio Naruto non trovato: {path}")
         self.path = path
 
         os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
@@ -36,13 +40,19 @@ class VanishSound:
             self.sound = mixer.Sound(str(path))  # Decode once, before opening the webcam.
         except Exception as error:
             if self.owns_mixer:
-                mixer.quit()
+                try:
+                    mixer.quit()
+                except Exception:
+                    pass
             raise RuntimeError(f"Impossibile aprire l'audio Naruto: {error}") from error
 
     def play(self) -> None:
         if self.ffplay is not None:
             if self.process is not None and self.process.poll() is None:
-                self.process.terminate()
+                try:
+                    self.process.terminate()
+                except (ProcessLookupError, OSError):
+                    pass
             try:
                 self.process = subprocess.Popen(
                     [self.ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet",
@@ -61,8 +71,14 @@ class VanishSound:
     def close(self) -> None:
         if self.ffplay is not None:
             if self.process is not None and self.process.poll() is None:
-                self.process.terminate()
+                try:
+                    self.process.terminate()
+                except (ProcessLookupError, OSError):
+                    pass
             return
         if self.owns_mixer:
-            self.mixer.quit()
+            try:
+                self.mixer.quit()
+            except Exception:
+                pass
             self.owns_mixer = False
