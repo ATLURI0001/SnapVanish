@@ -46,13 +46,28 @@ class VanishSound:
                     pass
             raise RuntimeError(f"Impossibile aprire l'audio Naruto: {error}") from error
 
+    def _stop_process(self, timeout: float = 2.0) -> None:
+        """Terminate any active ffplay child process and force-kill if it hangs."""
+        proc = self.process
+        self.process = None
+        if proc is None:
+            return
+        if proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                    proc.wait(timeout=timeout)
+                except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
+                    pass
+            except (ProcessLookupError, OSError):
+                pass
+
     def play(self) -> None:
         if self.ffplay is not None:
-            if self.process is not None and self.process.poll() is None:
-                try:
-                    self.process.terminate()
-                except (ProcessLookupError, OSError):
-                    pass
+            self._stop_process()
             try:
                 self.process = subprocess.Popen(
                     [self.ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet",
@@ -70,11 +85,7 @@ class VanishSound:
 
     def close(self) -> None:
         if self.ffplay is not None:
-            if self.process is not None and self.process.poll() is None:
-                try:
-                    self.process.terminate()
-                except (ProcessLookupError, OSError):
-                    pass
+            self._stop_process()
             return
         if self.owns_mixer:
             try:
@@ -82,3 +93,9 @@ class VanishSound:
             except Exception:
                 pass
             self.owns_mixer = False
+
+    def __enter__(self) -> "VanishSound":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
