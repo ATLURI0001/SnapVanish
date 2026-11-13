@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
 import subprocess
@@ -12,7 +13,9 @@ SOUND_PATH = Path(__file__).resolve().parent / "assets" / "vanish.MP3"
 
 
 class VanishSound:
-    def __init__(self, path: str | Path = SOUND_PATH):
+    def __init__(self, path: str | Path | None = None):
+        if not path:
+            path = SOUND_PATH
         path = Path(path)
         if not path.is_file():
             if path.suffix.lower() == ".mp3":
@@ -56,6 +59,8 @@ class VanishSound:
 
     def _stop_process(self, timeout: float = 2.0) -> None:
         """Terminate any active ffplay child process and force-kill if it hangs."""
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not math.isfinite(timeout) or timeout <= 0:
+            timeout = 2.0
         proc = self.process
         self.process = None
         if proc is None:
@@ -120,3 +125,9 @@ class VanishSound:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass

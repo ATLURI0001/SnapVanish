@@ -101,6 +101,26 @@ class TestVanishSound(unittest.TestCase):
             VanishSound(Path("non_existent_audio.wav"))
         self.assertIn("non trovato", str(ctx.exception))
 
+    def test_default_and_none_path_defaults_to_sound_path(self):
+        with patch("shutil.which", return_value="/usr/bin/ffplay"), \
+             patch.dict("sys.modules", {"pygame": None, "pygame.mixer": None}):
+            vs_none = VanishSound(None)
+            self.assertEqual(vs_none.path, SOUND_PATH)
+            vs_empty = VanishSound("")
+            self.assertEqual(vs_empty.path, SOUND_PATH)
+
+    def test_destructor_closes_child_process(self):
+        mock_process = Mock()
+        mock_process.poll.return_value = None
+
+        with patch("shutil.which", return_value="/usr/bin/ffplay"), \
+             patch.dict("sys.modules", {"pygame": None, "pygame.mixer": None}), \
+             patch("subprocess.Popen", return_value=mock_process):
+            vs = VanishSound()
+            vs.play()
+            vs.__del__()
+            mock_process.terminate.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
