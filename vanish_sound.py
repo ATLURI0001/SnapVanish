@@ -13,7 +13,7 @@ SOUND_PATH = Path(__file__).resolve().parent / "assets" / "vanish.MP3"
 
 
 class VanishSound:
-    def __init__(self, path: str | Path | None = None):
+    def __init__(self, path: str | Path | None = None, volume: float = 1.0):
         if not path:
             path = SOUND_PATH
         path = Path(path)
@@ -34,6 +34,8 @@ class VanishSound:
         self.sound = None
         self.owns_mixer = False
         self._closed = False
+        self.volume = 1.0
+        self.set_volume(volume)
         try:
             from pygame import mixer
         except ImportError:
@@ -48,6 +50,7 @@ class VanishSound:
             if self.owns_mixer:
                 mixer.init(frequency=44100, size=-16, channels=2, buffer=256)
             self.sound = mixer.Sound(str(path))  # Decode once, before opening the webcam.
+            self.sound.set_volume(self.volume)
         except Exception as error:
             if self.owns_mixer:
                 try:
@@ -56,6 +59,41 @@ class VanishSound:
                     pass
                 self.owns_mixer = False
             raise RuntimeError(f"Impossibile aprire l'audio Naruto: {error}") from error
+
+    def set_volume(self, volume: float) -> None:
+        """Set playback volume clamped between 0.0 and 1.0."""
+        if not isinstance(volume, (int, float)) or isinstance(volume, bool) or not math.isfinite(volume):
+            volume = 1.0
+        self.volume = max(0.0, min(1.0, float(volume)))
+        if self.sound is not None:
+            try:
+                self.sound.set_volume(self.volume)
+            except Exception:
+                pass
+
+    def stop(self) -> None:
+        """Stop active audio playback without closing resources."""
+        if self.ffplay is not None:
+            self._stop_process()
+            return
+        if self.sound is not None:
+            try:
+                self.sound.stop()
+            except Exception:
+                pass
+
+    def is_playing(self) -> bool:
+        """Return True if the sound is currently playing."""
+        if self._closed:
+            return False
+        if self.ffplay is not None:
+            return bool(self.process is not None and self.process.poll() is None)
+        if self.sound is not None:
+            try:
+                return bool(self.sound.get_num_channels() > 0)
+            except Exception:
+                return False
+        return False
 
     def _stop_process(self, timeout: float = 2.0) -> None:
         """Terminate any active ffplay child process and force-kill if it hangs."""
@@ -83,10 +121,13 @@ class VanishSound:
             raise RuntimeError("Audio Naruto già chiuso.")
         if self.ffplay is not None:
             self._stop_process()
+            cmd = [self.ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet"]
+            if self.volume < 1.0:
+                cmd.extend(["-volume", str(int(round(self.volume * 100)))])
+            cmd.extend(["-i", str(self.path)])
             try:
                 self.process = subprocess.Popen(
-                    [self.ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet",
-                     "-i", str(self.path)],
+                    cmd,
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),

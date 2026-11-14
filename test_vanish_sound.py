@@ -121,6 +121,47 @@ class TestVanishSound(unittest.TestCase):
             vs.__del__()
             mock_process.terminate.assert_called_once()
 
+    def test_volume_clamping_and_ffplay_flags(self):
+        mock_process = Mock()
+        mock_process.poll.return_value = None
+
+        with patch("shutil.which", return_value="/usr/bin/ffplay"), \
+             patch.dict("sys.modules", {"pygame": None, "pygame.mixer": None}), \
+             patch("subprocess.Popen", return_value=mock_process) as mock_popen:
+            # Volume bounds and guards
+            vs = VanishSound(volume=1.5)
+            self.assertEqual(vs.volume, 1.0)
+            vs.set_volume(-0.5)
+            self.assertEqual(vs.volume, 0.0)
+            vs.set_volume(float("nan"))
+            self.assertEqual(vs.volume, 1.0)
+            vs.set_volume(True)
+            self.assertEqual(vs.volume, 1.0)
+
+            # Volume < 1.0 passes -volume to ffplay
+            vs.set_volume(0.6)
+            vs.play()
+            called_args = mock_popen.call_args[0][0]
+            self.assertIn("-volume", called_args)
+            self.assertIn("60", called_args)
+
+    def test_stop_and_is_playing_lifecycle(self):
+        mock_process = Mock()
+        mock_process.poll.return_value = None
+
+        with patch("shutil.which", return_value="/usr/bin/ffplay"), \
+             patch.dict("sys.modules", {"pygame": None, "pygame.mixer": None}), \
+             patch("subprocess.Popen", return_value=mock_process):
+            vs = VanishSound()
+            self.assertFalse(vs.is_playing())
+
+            vs.play()
+            self.assertTrue(vs.is_playing())
+
+            vs.stop()
+            self.assertFalse(vs.is_playing())
+            mock_process.terminate.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
