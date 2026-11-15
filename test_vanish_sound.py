@@ -162,6 +162,60 @@ class TestVanishSound(unittest.TestCase):
             self.assertFalse(vs.is_playing())
             mock_process.terminate.assert_called_once()
 
+    def test_fade_out_and_is_closed_properties(self):
+        mock_process = Mock()
+        mock_process.poll.return_value = None
+
+        with patch("shutil.which", return_value="/usr/bin/ffplay"), \
+             patch.dict("sys.modules", {"pygame": None, "pygame.mixer": None}), \
+             patch("subprocess.Popen", return_value=mock_process):
+            vs = VanishSound(volume=0.85)
+            self.assertFalse(vs.is_closed)
+            self.assertAlmostEqual(vs.get_volume(), 0.85)
+
+            vs.play()
+            vs.fade_out(duration_ms=400)
+            mock_process.terminate.assert_called_once()
+
+            vs.close()
+            self.assertTrue(vs.is_closed)
+
+    def test_play_loops_ffplay_arguments(self):
+        mock_process = Mock()
+        mock_process.poll.return_value = None
+
+        with patch("shutil.which", return_value="/usr/bin/ffplay"), \
+             patch.dict("sys.modules", {"pygame": None, "pygame.mixer": None}), \
+             patch("subprocess.Popen", return_value=mock_process) as mock_popen:
+            vs = VanishSound()
+
+            # loops = 2 -> -loop 3
+            vs.play(loops=2)
+            called_args = mock_popen.call_args[0][0]
+            self.assertIn("-loop", called_args)
+            self.assertIn("3", called_args)
+
+            # loops = -1 -> -loop 0 (infinite)
+            vs.play(loops=-1)
+            called_args = mock_popen.call_args[0][0]
+            self.assertIn("-loop", called_args)
+            self.assertIn("0", called_args)
+
+    def test_pygame_fadeout_and_loop_calls(self):
+        mock_mixer = Mock()
+        mock_mixer.get_init.return_value = True
+        mock_sound = Mock()
+        mock_mixer.Sound.return_value = mock_sound
+        mock_pygame = Mock(mixer=mock_mixer)
+
+        with patch.dict("sys.modules", {"pygame": mock_pygame, "pygame.mixer": mock_mixer}):
+            vs = VanishSound()
+            vs.play(loops=3)
+            mock_sound.play.assert_called_with(loops=3)
+
+            vs.fade_out(500)
+            mock_sound.fadeout.assert_called_with(500)
+
 
 if __name__ == "__main__":
     unittest.main()

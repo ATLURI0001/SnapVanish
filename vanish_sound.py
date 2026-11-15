@@ -71,6 +71,15 @@ class VanishSound:
             except Exception:
                 pass
 
+    def get_volume(self) -> float:
+        """Return current volume level between 0.0 and 1.0."""
+        return self.volume
+
+    @property
+    def is_closed(self) -> bool:
+        """Return True if sound engine or child process has been closed."""
+        return self._closed
+
     def stop(self) -> None:
         """Stop active audio playback without closing resources."""
         if self.ffplay is not None:
@@ -79,6 +88,20 @@ class VanishSound:
         if self.sound is not None:
             try:
                 self.sound.stop()
+            except Exception:
+                pass
+
+    def fade_out(self, duration_ms: int = 300) -> None:
+        """Fade out active audio playback over duration_ms milliseconds."""
+        if not isinstance(duration_ms, int) or isinstance(duration_ms, bool) or duration_ms < 0:
+            duration_ms = 300
+        duration_ms = min(10000, duration_ms)
+        if self.ffplay is not None:
+            self._stop_process()
+            return
+        if self.sound is not None:
+            try:
+                self.sound.fadeout(duration_ms)
             except Exception:
                 pass
 
@@ -116,12 +139,20 @@ class VanishSound:
             except (ProcessLookupError, OSError):
                 pass
 
-    def play(self) -> None:
+    def play(self, loops: int = 0) -> None:
         if self._closed:
             raise RuntimeError("Audio Naruto già chiuso.")
+        if not isinstance(loops, int) or isinstance(loops, bool):
+            loops = 0
+        loops = max(-1, min(100, loops))
+
         if self.ffplay is not None:
             self._stop_process()
             cmd = [self.ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet"]
+            if loops == -1:
+                cmd.extend(["-loop", "0"])
+            elif loops > 0:
+                cmd.extend(["-loop", str(loops + 1)])
             if self.volume < 1.0:
                 cmd.extend(["-volume", str(int(round(self.volume * 100)))])
             cmd.extend(["-i", str(self.path)])
@@ -138,7 +169,7 @@ class VanishSound:
         if self.sound is None:
             raise RuntimeError("Audio Naruto non inizializzato.")
         self.sound.stop()
-        if self.sound.play() is None:
+        if self.sound.play(loops=loops) is None:
             raise RuntimeError("Impossibile avviare l'audio Naruto: nessun canale libero.")
 
     def close(self) -> None:
