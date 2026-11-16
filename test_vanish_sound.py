@@ -238,6 +238,47 @@ class TestVanishSound(unittest.TestCase):
             self.assertEqual(vs.get_volume(), 0.8)
             self.assertFalse(vs.is_muted)
 
+    def test_pause_unpause_and_panning_controls(self):
+        mock_mixer = Mock()
+        mock_mixer.get_init.return_value = True
+        mock_channel = Mock()
+        mock_sound = Mock()
+        mock_sound.play.return_value = mock_channel
+        mock_mixer.Sound.return_value = mock_sound
+        mock_pygame = Mock(mixer=mock_mixer)
+
+        with patch.dict("sys.modules", {"pygame": mock_pygame, "pygame.mixer": mock_mixer}):
+            vs = VanishSound(volume=0.8)
+            self.assertFalse(vs.is_paused)
+            self.assertEqual(vs.get_pan(), 0.0)
+
+            vs.play()
+            self.assertIs(vs.channel, mock_channel)
+
+            vs.pause()
+            mock_channel.pause.assert_called_once()
+            self.assertTrue(vs.is_paused)
+
+            vs.unpause()
+            mock_channel.unpause.assert_called_once()
+            self.assertFalse(vs.is_paused)
+
+            # Test stereo panning
+            vs.set_pan(0.5)
+            self.assertEqual(vs.get_pan(), 0.5)
+            # Left: (1.0 - 0.5) * 0.8 = 0.4, Right: (1.0) clamped * 0.8 = 0.8
+            mock_channel.set_volume.assert_called_with(0.4, 0.8)
+
+            # Test clamping
+            vs.set_pan(-2.0)
+            self.assertEqual(vs.get_pan(), -1.0)
+            vs.set_pan(float("nan"))
+            self.assertEqual(vs.get_pan(), 0.0)
+
+            vs.stop()
+            self.assertIsNone(vs.channel)
+            self.assertFalse(vs.is_paused)
+
 
 
 if __name__ == "__main__":

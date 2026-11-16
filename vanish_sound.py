@@ -32,6 +32,9 @@ class VanishSound:
         self.process = None
         self.ffplay = None
         self.sound = None
+        self.channel = None
+        self._paused = False
+        self._pan = 0.0
         self.owns_mixer = False
         self._closed = False
         self.volume = 1.0
@@ -109,12 +112,58 @@ class VanishSound:
 
     def stop(self) -> None:
         """Stop active audio playback without closing resources."""
+        self._paused = False
+        self.channel = None
         if self.ffplay is not None:
             self._stop_process()
             return
         if self.sound is not None:
             try:
                 self.sound.stop()
+            except Exception:
+                pass
+
+    def pause(self) -> None:
+        """Pause audio playback on active sound channel."""
+        if self.channel is not None:
+            try:
+                self.channel.pause()
+            except Exception:
+                pass
+        self._paused = True
+
+    def unpause(self) -> None:
+        """Resume playback on active sound channel."""
+        if self.channel is not None:
+            try:
+                self.channel.unpause()
+            except Exception:
+                pass
+        self._paused = False
+
+    @property
+    def is_paused(self) -> bool:
+        """Return True if playback is currently paused."""
+        return self._paused
+
+    def set_pan(self, pan: float) -> None:
+        """Set stereo panning balance between -1.0 (left) and 1.0 (right)."""
+        if not isinstance(pan, (int, float)) or isinstance(pan, bool) or not math.isfinite(pan):
+            pan = 0.0
+        self._pan = max(-1.0, min(1.0, float(pan)))
+        self._apply_pan()
+
+    def get_pan(self) -> float:
+        """Return current stereo panning level between -1.0 and 1.0."""
+        return self._pan
+
+    def _apply_pan(self) -> None:
+        """Apply stereo channel panning to active channel."""
+        if self.channel is not None:
+            left = max(0.0, min(1.0, 1.0 - self._pan)) * self.volume
+            right = max(0.0, min(1.0, 1.0 + self._pan)) * self.volume
+            try:
+                self.channel.set_volume(left, right)
             except Exception:
                 pass
 
@@ -196,13 +245,20 @@ class VanishSound:
         if self.sound is None:
             raise RuntimeError("Audio Naruto non inizializzato.")
         self.sound.stop()
-        if self.sound.play(loops=loops) is None:
+        channel = self.sound.play(loops=loops)
+        if channel is None:
             raise RuntimeError("Impossibile avviare l'audio Naruto: nessun canale libero.")
+        self.channel = channel
+        self._paused = False
+        if self._pan != 0.0:
+            self._apply_pan()
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
+        self.channel = None
+        self._paused = False
         if self.ffplay is not None:
             self._stop_process()
             return
