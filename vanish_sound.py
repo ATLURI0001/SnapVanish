@@ -36,6 +36,7 @@ class VanishSound:
         self._closed = False
         self.volume = 1.0
         self.set_volume(volume)
+        self._pre_mute_volume = self.volume if self.volume > 0.0 else 1.0
         try:
             from pygame import mixer
         except ImportError:
@@ -74,6 +75,32 @@ class VanishSound:
     def get_volume(self) -> float:
         """Return current volume level between 0.0 and 1.0."""
         return self.volume
+
+    def mute(self) -> None:
+        """Mute audio playback while preserving previous volume level."""
+        if self.volume > 0.0:
+            self._pre_mute_volume = self.volume
+        self.set_volume(0.0)
+
+    def unmute(self) -> None:
+        """Restore previous volume level prior to muting."""
+        restore = self._pre_mute_volume if self._pre_mute_volume > 0.0 else 1.0
+        self.set_volume(restore)
+
+    @property
+    def is_muted(self) -> bool:
+        """Return True if playback volume is currently muted to 0.0."""
+        return bool(self.volume == 0.0)
+
+    def get_length(self) -> float:
+        """Return length of loaded audio in seconds, or 0.0 if unknown/unavailable."""
+        if self.sound is not None:
+            try:
+                length = float(self.sound.get_length())
+                return length if math.isfinite(length) and length >= 0.0 else 0.0
+            except Exception:
+                return 0.0
+        return 0.0
 
     @property
     def is_closed(self) -> bool:
