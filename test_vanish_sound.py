@@ -216,6 +216,29 @@ class TestVanishSound(unittest.TestCase):
             vs.fade_out(500)
             mock_sound.fadeout.assert_called_with(500)
 
+    def test_mute_unmute_and_length_introspection(self):
+        mock_mixer = Mock()
+        mock_mixer.get_init.return_value = True
+        mock_sound = Mock()
+        mock_sound.get_length.return_value = 1.45
+        mock_mixer.Sound.return_value = mock_sound
+        mock_pygame = Mock(mixer=mock_mixer)
+
+        with patch.dict("sys.modules", {"pygame": mock_pygame, "pygame.mixer": mock_mixer}):
+            vs = VanishSound(volume=0.8)
+            self.assertEqual(vs.get_volume(), 0.8)
+            self.assertFalse(vs.is_muted)
+            self.assertEqual(vs.get_length(), 1.45)
+
+            vs.mute()
+            self.assertEqual(vs.get_volume(), 0.0)
+            self.assertTrue(vs.is_muted)
+
+            vs.unmute()
+            self.assertEqual(vs.get_volume(), 0.8)
+            self.assertFalse(vs.is_muted)
+
+
 
 if __name__ == "__main__":
     unittest.main()
