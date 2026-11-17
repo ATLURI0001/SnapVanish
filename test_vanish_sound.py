@@ -279,6 +279,52 @@ class TestVanishSound(unittest.TestCase):
             self.assertIsNone(vs.channel)
             self.assertFalse(vs.is_paused)
 
+    def test_volume_db_scaling_and_conversions(self):
+        mock_mixer = Mock()
+        mock_mixer.get_init.return_value = True
+        mock_sound = Mock()
+        mock_mixer.Sound.return_value = mock_sound
+        mock_pygame = Mock(mixer=mock_mixer)
+
+        with patch.dict("sys.modules", {"pygame": mock_pygame, "pygame.mixer": mock_mixer}):
+            vs = VanishSound(volume=1.0)
+            self.assertEqual(vs.get_volume_db(), 0.0)
+
+            # Test setting decibels
+            vs.set_volume_db(-6.02)
+            self.assertAlmostEqual(vs.get_volume(), 0.5, places=2)
+            self.assertAlmostEqual(vs.get_volume_db(), -6.02, places=1)
+
+            # Floor at -60 dB
+            vs.set_volume_db(-60.0)
+            self.assertEqual(vs.get_volume(), 0.0)
+            self.assertEqual(vs.get_volume_db(), -60.0)
+
+            # Clamping beyond -60 dB and 0 dB
+            vs.set_volume_db(-100.0)
+            self.assertEqual(vs.get_volume(), 0.0)
+            vs.set_volume_db(10.0)
+            self.assertEqual(vs.get_volume(), 1.0)
+            self.assertEqual(vs.get_volume_db(), 0.0)
+
+            # Invalid input defaults safely to 0 dB (vol 1.0)
+            vs.set_volume_db("invalid")
+            self.assertEqual(vs.get_volume(), 1.0)
+
+    def test_fade_in_playback(self):
+        mock_mixer = Mock()
+        mock_mixer.get_init.return_value = True
+        mock_channel = Mock()
+        mock_sound = Mock()
+        mock_sound.play.return_value = mock_channel
+        mock_mixer.Sound.return_value = mock_sound
+        mock_pygame = Mock(mixer=mock_mixer)
+
+        with patch.dict("sys.modules", {"pygame": mock_pygame, "pygame.mixer": mock_mixer}):
+            vs = VanishSound()
+            vs.fade_in(duration_ms=500, loops=2)
+            mock_sound.play.assert_called_with(loops=2, fade_ms=500)
+            self.assertIs(vs.channel, mock_channel)
 
 
 if __name__ == "__main__":

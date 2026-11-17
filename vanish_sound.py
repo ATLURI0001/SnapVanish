@@ -79,6 +79,22 @@ class VanishSound:
         """Return current volume level between 0.0 and 1.0."""
         return self.volume
 
+    def set_volume_db(self, db: float) -> None:
+        """Set playback volume from decibels clamped between -60.0 dB and 0.0 dB."""
+        if not isinstance(db, (int, float)) or isinstance(db, bool) or not math.isfinite(db):
+            db = 0.0
+        clamped_db = max(-60.0, min(0.0, float(db)))
+        if clamped_db <= -60.0:
+            self.set_volume(0.0)
+        else:
+            self.set_volume(round(10.0 ** (clamped_db / 20.0), 4))
+
+    def get_volume_db(self) -> float:
+        """Return current volume level expressed in decibels (-60.0 dB to 0.0 dB)."""
+        if self.volume <= 0.001:
+            return -60.0
+        return round(20.0 * math.log10(self.volume), 2)
+
     def mute(self) -> None:
         """Mute audio playback while preserving previous volume level."""
         if self.volume > 0.0:
@@ -181,6 +197,13 @@ class VanishSound:
             except Exception:
                 pass
 
+    def fade_in(self, duration_ms: int = 300, loops: int = 0) -> None:
+        """Fade in audio playback over duration_ms milliseconds."""
+        if not isinstance(duration_ms, int) or isinstance(duration_ms, bool) or duration_ms < 0:
+            duration_ms = 300
+        duration_ms = min(10000, duration_ms)
+        self.play(loops=loops, fade_ms=duration_ms)
+
     def is_playing(self) -> bool:
         """Return True if the sound is currently playing."""
         if self._closed:
@@ -215,12 +238,15 @@ class VanishSound:
             except (ProcessLookupError, OSError):
                 pass
 
-    def play(self, loops: int = 0) -> None:
+    def play(self, loops: int = 0, fade_ms: int = 0) -> None:
         if self._closed:
             raise RuntimeError("Audio Naruto già chiuso.")
         if not isinstance(loops, int) or isinstance(loops, bool):
             loops = 0
         loops = max(-1, min(100, loops))
+        if not isinstance(fade_ms, int) or isinstance(fade_ms, bool) or fade_ms < 0:
+            fade_ms = 0
+        fade_ms = min(10000, fade_ms)
 
         if self.ffplay is not None:
             self._stop_process()
@@ -245,7 +271,10 @@ class VanishSound:
         if self.sound is None:
             raise RuntimeError("Audio Naruto non inizializzato.")
         self.sound.stop()
-        channel = self.sound.play(loops=loops)
+        if fade_ms > 0:
+            channel = self.sound.play(loops=loops, fade_ms=fade_ms)
+        else:
+            channel = self.sound.play(loops=loops)
         if channel is None:
             raise RuntimeError("Impossibile avviare l'audio Naruto: nessun canale libero.")
         self.channel = channel
