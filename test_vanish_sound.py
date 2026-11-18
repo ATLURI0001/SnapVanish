@@ -1,8 +1,10 @@
+import math
 import subprocess
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
-from vanish_sound import VanishSound, SOUND_PATH
+from vanish_sound import VanishSound, SOUND_PATH, compute_stereo_gains
 
 
 class TestVanishSound(unittest.TestCase):
@@ -325,6 +327,87 @@ class TestVanishSound(unittest.TestCase):
             vs.fade_in(duration_ms=500, loops=2)
             mock_sound.play.assert_called_with(loops=2, fade_ms=500)
             self.assertIs(vs.channel, mock_channel)
+
+    def test_constant_power_panning_preserves_acoustic_energy(self):
+        for pan in (-1.0, -0.5, 0.0, 0.5, 1.0):
+            left, right = compute_stereo_gains(pan, volume=0.8, law="constant_power")
+            energy = math.sqrt(left * left + right * right)
+            self.assertAlmostEqual(energy, 0.8, places=4)
+
+        mock_mixer = Mock()
+        mock_mixer.get_init.return_value = True
+        mock_channel = Mock()
+        mock_sound = Mock()
+        mock_sound.play.return_value = mock_channel
+        mock_mixer.Sound.return_value = mock_sound
+        mock_pygame = Mock(mixer=mock_mixer)
+
+        with patch.dict("sys.modules", {"pygame": mock_pygame, "pygame.mixer": mock_mixer}):
+            vs = VanishSound(volume=1.0, pan_law="constant_power")
+            vs.play()
+            expected_center = round(math.cos(math.pi / 4.0), 6)
+            mock_channel.set_volume.assert_called_with(expected_center, expected_center)
+            with self.assertRaises(ValueError):
+                vs.set_pan_law("unsupported_law")
+
+    def test_monotonic_cooldown_debounce_and_telemetry(self):
+        mock_mixer = Mock()
+        mock_mixer.get_init.return_value = True
+        mock_channel = Mock()
+        mock_sound = Mock()
+        mock_sound.play.return_value = mock_channel
+        mock_mixer.Sound.return_value = mock_sound
+        mock_pygame = Mock(mixer=mock_mixer)
+
+        now = [10.0]
+
+        with patch.dict("sys.modules", {"pygame": mock_pygame, "pygame.mixer": mock_mixer}):
+            vs = VanishSound(min_trigger_interval_ms=250, clock=lambda: now[0])
+            self.assertTrue(vs.play())
+            now[0] = 10.100  # 100ms elapsed < 250ms cooldown
+            self.assertFalse(vs.play())
+            # Force bypasses cooldown
+            self.assertTrue(vs.play(force=True))
+            now[0] = 10.400  # 300ms elapsed >= 250ms cooldown
+            self.assertTrue(vs.play())
+
+            telemetry = vs.get_telemetry()
+            self.assertEqual(telemetry["backend"], "pygame")
+            self.assertEqual(telemetry["play_count"], 3)
+            self.assertEqual(telemetry["suppressed_count"], 1)
+            self.assertEqual(telemetry["cooldown_ms"], 250)
+            self.assertEqual(telemetry["last_play_monotonic"], 10.400)
+
+    def test_concurrent_play_and_volume_thread_safety(self):
+        mock_mixer = Mock()
+        mock_mixer.get_init.return_value = True
+        mock_channel = Mock()
+        mock_sound = Mock()
+        mock_sound.play.return_value = mock_channel
+        mock_mixer.Sound.return_value = mock_sound
+        mock_pygame = Mock(mixer=mock_mixer)
+
+        errors = []
+        with patch.dict("sys.modules", {"pygame": mock_pygame, "pygame.mixer": mock_mixer}):
+            vs = VanishSound()
+
+            def worker(idx: int):
+                try:
+                    for j in range(25):
+                        vs.set_pan((j % 5 - 2) * 0.5)
+                        vs.play()
+                        _ = vs.get_telemetry()
+                except Exception as exc:
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            self.assertEqual(errors, [])
+            self.assertEqual(vs.get_telemetry()["play_count"], 100)
 
 
 if __name__ == "__main__":
