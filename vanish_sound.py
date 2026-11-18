@@ -6,14 +6,46 @@ import math
 import os
 import shutil
 import subprocess
+import threading
+import time
 from pathlib import Path
+from typing import Callable
 
 
 SOUND_PATH = Path(__file__).resolve().parent / "assets" / "vanish.MP3"
+PAN_LAWS = ("linear", "constant_power")
+
+
+def compute_stereo_gains(pan: float, volume: float, law: str = "linear") -> tuple[float, float]:
+    """Compute left and right channel gains for stereo panning.
+
+    Supports:
+      - 'linear': balance-style clamped linear attenuation (default, backward compatible).
+      - 'constant_power': equal-power sine/cosine law preserving acoustic energy L^2 + R^2 = V^2.
+    """
+    if not isinstance(pan, (int, float)) or isinstance(pan, bool) or not math.isfinite(pan):
+        pan = 0.0
+    if not isinstance(volume, (int, float)) or isinstance(volume, bool) or not math.isfinite(volume):
+        volume = 1.0
+    p = max(-1.0, min(1.0, float(pan)))
+    v = max(0.0, min(1.0, float(volume)))
+    if law == "constant_power":
+        theta = (p + 1.0) * (math.pi / 4.0)
+        return round(math.cos(theta) * v, 6), round(math.sin(theta) * v, 6)
+    left = max(0.0, min(1.0, 1.0 - p)) * v
+    right = max(0.0, min(1.0, 1.0 + p)) * v
+    return left, right
 
 
 class VanishSound:
-    def __init__(self, path: str | Path | None = None, volume: float = 1.0):
+    def __init__(
+        self,
+        path: str | Path | None = None,
+        volume: float = 1.0,
+        min_trigger_interval_ms: int = 0,
+        pan_law: str = "linear",
+        clock: Callable[[], float] | None = None,
+    ):
         if not path:
             path = SOUND_PATH
         path = Path(path)
@@ -29,6 +61,13 @@ class VanishSound:
         self.path = path
 
         os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+        self._lock = threading.RLock()
+        self._clock: Callable[[], float] = clock if callable(clock) else time.monotonic
+        self._cooldown_ms = 0
+        self._pan_law = "linear"
+        self._last_play_ts: float | None = None
+        self._play_count = 0
+        self._suppressed_count = 0
         self.process = None
         self.ffplay = None
         self.sound = None
@@ -39,6 +78,8 @@ class VanishSound:
         self._closed = False
         self.volume = 1.0
         self.set_volume(volume)
+        self.set_cooldown(min_trigger_interval_ms)
+        self.set_pan_law(pan_law)
         self._pre_mute_volume = self.volume if self.volume > 0.0 else 1.0
         try:
             from pygame import mixer
@@ -164,20 +205,64 @@ class VanishSound:
 
     def set_pan(self, pan: float) -> None:
         """Set stereo panning balance between -1.0 (left) and 1.0 (right)."""
-        if not isinstance(pan, (int, float)) or isinstance(pan, bool) or not math.isfinite(pan):
-            pan = 0.0
-        self._pan = max(-1.0, min(1.0, float(pan)))
-        self._apply_pan()
+        with self._lock:
+            if not isinstance(pan, (int, float)) or isinstance(pan, bool) or not math.isfinite(pan):
+                pan = 0.0
+            self._pan = max(-1.0, min(1.0, float(pan)))
+            self._apply_pan()
 
     def get_pan(self) -> float:
         """Return current stereo panning level between -1.0 and 1.0."""
-        return self._pan
+        with self._lock:
+            return self._pan
+
+    def set_pan_law(self, law: str) -> None:
+        """Select stereo panning law ('linear' or 'constant_power')."""
+        with self._lock:
+            if law not in PAN_LAWS:
+                raise ValueError(f"Unsupported pan law '{law}'. Expected one of {PAN_LAWS}.")
+            self._pan_law = law
+            self._apply_pan()
+
+    def get_pan_law(self) -> str:
+        """Return active stereo panning law."""
+        with self._lock:
+            return self._pan_law
+
+    def set_cooldown(self, interval_ms: int) -> None:
+        """Set minimum debounce interval between consecutive play() triggers in milliseconds."""
+        with self._lock:
+            if not isinstance(interval_ms, int) or isinstance(interval_ms, bool) or interval_ms < 0:
+                interval_ms = 0
+            self._cooldown_ms = min(60000, interval_ms)
+
+    def get_cooldown(self) -> int:
+        """Return active trigger cooldown window in milliseconds."""
+        with self._lock:
+            return self._cooldown_ms
+
+    def get_telemetry(self) -> dict[str, object]:
+        """Return thread-safe runtime diagnostics snapshot for audio engine observability."""
+        with self._lock:
+            return {
+                "backend": "ffplay" if self.ffplay is not None else "pygame",
+                "play_count": self._play_count,
+                "suppressed_count": self._suppressed_count,
+                "last_play_monotonic": self._last_play_ts,
+                "cooldown_ms": self._cooldown_ms,
+                "pan": self._pan,
+                "pan_law": self._pan_law,
+                "volume": self.volume,
+                "volume_db": self.get_volume_db(),
+                "is_muted": self.is_muted,
+                "is_paused": self._paused,
+                "is_closed": self._closed,
+            }
 
     def _apply_pan(self) -> None:
-        """Apply stereo channel panning to active channel."""
+        """Apply stereo channel panning to active channel using active pan law."""
         if self.channel is not None:
-            left = max(0.0, min(1.0, 1.0 - self._pan)) * self.volume
-            right = max(0.0, min(1.0, 1.0 + self._pan)) * self.volume
+            left, right = compute_stereo_gains(self._pan, self.volume, law=self._pan_law)
             try:
                 self.channel.set_volume(left, right)
             except Exception:
@@ -238,71 +323,88 @@ class VanishSound:
             except (ProcessLookupError, OSError):
                 pass
 
-    def play(self, loops: int = 0, fade_ms: int = 0) -> None:
-        if self._closed:
-            raise RuntimeError("Audio Naruto già chiuso.")
-        if not isinstance(loops, int) or isinstance(loops, bool):
-            loops = 0
-        loops = max(-1, min(100, loops))
-        if not isinstance(fade_ms, int) or isinstance(fade_ms, bool) or fade_ms < 0:
-            fade_ms = 0
-        fade_ms = min(10000, fade_ms)
+    def play(self, loops: int = 0, fade_ms: int = 0, force: bool = False) -> bool:
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Audio Naruto già chiuso.")
+            if not isinstance(loops, int) or isinstance(loops, bool):
+                loops = 0
+            loops = max(-1, min(100, loops))
+            if not isinstance(fade_ms, int) or isinstance(fade_ms, bool) or fade_ms < 0:
+                fade_ms = 0
+            fade_ms = min(10000, fade_ms)
 
-        if self.ffplay is not None:
-            self._stop_process()
-            cmd = [self.ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet"]
-            if loops == -1:
-                cmd.extend(["-loop", "0"])
-            elif loops > 0:
-                cmd.extend(["-loop", str(loops + 1)])
-            if self.volume < 1.0:
-                cmd.extend(["-volume", str(int(round(self.volume * 100)))])
-            cmd.extend(["-i", str(self.path)])
-            try:
-                self.process = subprocess.Popen(
-                    cmd,
-                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-            except OSError as error:
-                raise RuntimeError(f"Impossibile avviare l'audio Naruto: {error}") from error
-            return
-        if self.sound is None:
-            raise RuntimeError("Audio Naruto non inizializzato.")
-        self.sound.stop()
-        if fade_ms > 0:
-            channel = self.sound.play(loops=loops, fade_ms=fade_ms)
-        else:
-            channel = self.sound.play(loops=loops)
-        if channel is None:
-            raise RuntimeError("Impossibile avviare l'audio Naruto: nessun canale libero.")
-        self.channel = channel
-        self._paused = False
-        if self._pan != 0.0:
-            self._apply_pan()
+            now = self._clock()
+            if (
+                not force
+                and self._cooldown_ms > 0
+                and self._last_play_ts is not None
+                and (now - self._last_play_ts) * 1000.0 < self._cooldown_ms
+            ):
+                self._suppressed_count += 1
+                return False
+
+            if self.ffplay is not None:
+                self._stop_process()
+                cmd = [self.ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet"]
+                if loops == -1:
+                    cmd.extend(["-loop", "0"])
+                elif loops > 0:
+                    cmd.extend(["-loop", str(loops + 1)])
+                if self.volume < 1.0:
+                    cmd.extend(["-volume", str(int(round(self.volume * 100)))])
+                cmd.extend(["-i", str(self.path)])
+                try:
+                    self.process = subprocess.Popen(
+                        cmd,
+                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                except OSError as error:
+                    raise RuntimeError(f"Impossibile avviare l'audio Naruto: {error}") from error
+                self._last_play_ts = now
+                self._play_count += 1
+                return True
+            if self.sound is None:
+                raise RuntimeError("Audio Naruto non inizializzato.")
+            self.sound.stop()
+            if fade_ms > 0:
+                channel = self.sound.play(loops=loops, fade_ms=fade_ms)
+            else:
+                channel = self.sound.play(loops=loops)
+            if channel is None:
+                raise RuntimeError("Impossibile avviare l'audio Naruto: nessun canale libero.")
+            self.channel = channel
+            self._paused = False
+            self._last_play_ts = now
+            self._play_count += 1
+            if self._pan != 0.0 or self._pan_law == "constant_power":
+                self._apply_pan()
+            return True
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        self.channel = None
-        self._paused = False
-        if self.ffplay is not None:
-            self._stop_process()
-            return
-        if self.sound is not None:
-            try:
-                self.sound.stop()
-            except Exception:
-                pass
-            self.sound = None
-        if self.owns_mixer:
-            try:
-                self.mixer.quit()
-            except Exception:
-                pass
-            self.owns_mixer = False
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            self.channel = None
+            self._paused = False
+            if self.ffplay is not None:
+                self._stop_process()
+                return
+            if self.sound is not None:
+                try:
+                    self.sound.stop()
+                except Exception:
+                    pass
+                self.sound = None
+            if self.owns_mixer:
+                try:
+                    self.mixer.quit()
+                except Exception:
+                    pass
+                self.owns_mixer = False
 
     def __enter__(self) -> "VanishSound":
         return self
